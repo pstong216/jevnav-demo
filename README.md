@@ -11,24 +11,22 @@ The central split is:
 - A simulator or conventional controller handles geometry, collision checking,
   and low-level motion.
 
-This repository defaults to a deterministic mock environment and mock decision
-engine, so it runs without credentials or robot hardware. The real Jev adapter
-and an AI2-THOR adapter are included behind optional dependencies.
+The dashboard defaults to a deterministic BFS controller, so it runs without
+credentials or robot hardware. Jev uses TypeSafe's official HTTP API. An optional
+OpenRouter LLM planner supplies objectives and waypoints in the background.
+AI2-THOR is still only an initial adapter, not an integrated 3D demo.
 
 ## Architecture
 
-```text
-Natural-language goal
-        |
-Environment state + legal high-level skills
-        |
-   Jev reflex decision
-     /             \
-high confidence    low confidence / unsafe
-     |                    |
-execute skill       stop or planner fallback
-     |
-new environment state -> repeat
+```mermaid
+flowchart TD
+    S[State and legal actions] --> J[Jev action selection]
+    S --> P[Background planner]
+    P -->|Objective and waypoint| J
+    J --> G[Confidence and risk gate]
+    G -->|Accepted action| E[Validated grid executor]
+    G -->|Replan request| P
+    E --> S
 ```
 
 ## Quick start
@@ -50,13 +48,12 @@ The default engine is a deterministic **BFS baseline, not Jev**. This is a
 fully observed 2D grid sandbox, not AI2-THOR, visual navigation, or robot physics.
 Candidates are generated from current collision and interaction preconditions;
 the executor validates them again before moving. Completion is checked by the
-environment, not a model's completion score. Episodes stop after 100 actions.
-Subgoals are rule-based; asynchronous LLM planning is not implemented yet.
+environment, not a model's completion score. Episodes stop after 100 actions or
+12 consecutive steps without movement or object-state progress.
 
-To use the existing Jev SDK adapter for these same live grid states:
+To use Jev for these same live grid states (no SDK install needed):
 
 ```bash
-pip install -e '.[jev]'
 export TYPESAFE_API_KEY='...'
 jevnav-dashboard --engine jev
 ```
@@ -64,7 +61,47 @@ jevnav-dashboard --engine jev
 The API adapter is not yet validated end-to-end with live credentials. API errors
 stop the episode; they never silently switch to the baseline. Keys remain in the
 server process. The server binds only to localhost and supports one shared session.
-In this sandbox, `replan` refreshes observations; it does not call an LLM.
+Without a planner, requesting `replan` explicitly stops the episode rather than
+repeating an ineffective action. Model-returned actions, probability ranges and
+distributions are checked before execution. HTTP errors are sanitized, use a
+30-second socket timeout, and stop the episode without automatic retries.
+
+### Enable background planning
+
+Offline check of the planner pipeline (this is still not an LLM):
+
+```bash
+jevnav-dashboard --planner rule
+```
+
+Jev action selection plus an actual LLM planner:
+
+```bash
+export TYPESAFE_API_KEY='your-typesafe-key'
+export OPENROUTER_API_KEY='your-openrouter-key'
+jevnav-dashboard --engine jev --planner llm --planner-model 'provider/model-id'
+```
+
+Replace `provider/model-id` with a model available to your OpenRouter account that
+supports JSON mode. `--engine baseline --planner llm` is also supported for testing
+the planner independently. The app does not automatically load `.env`; export
+variables in the terminal that starts it. `JEV_MODEL` optionally overrides
+`jev-latest`.
+
+The planner sees the goal, map, inventory and recent outcomes, and returns an
+objective, optional waypoint and notes. Its output becomes part of the next Jev
+state. Only one request runs at a time. New plans are requested on task-stage or
+map changes, every eight executed actions, on reaching an intermediate waypoint,
+or on `replan`. A valid existing plan remains usable during background refresh;
+the robot waits when there is no plan for the current stage. Results from a prior
+stage, map revision or reset are discarded. Invalid coordinates and blocked
+waypoints are rejected. A valid waypoint is not proof that the plan is useful.
+Planner errors stop the episode; reset to retry.
+
+The dashboard shows planner status, objective/waypoint, action probabilities,
+decision time and Jev input-token totals. Export includes plan lifecycle events
+and the context used for each executed action. Planner token/cost accounting is
+not yet included.
 
 Architecture inspiration: [rmalde/minecraft-agent](https://github.com/rmalde/minecraft-agent),
 particularly executable candidates and action-result feedback. No source code
@@ -87,22 +124,26 @@ place mug in sink -> stop.
 Get an API key from TypeSafe, then:
 
 ```bash
-pip install -e '.[jev]'
 export TYPESAFE_API_KEY='...'
 jevnav --engine jev
 ```
 
-The adapter sends one `Choice` and three `Noul` questions in the same
-`system_one` request:
+The adapter sends one `Choice`, two status `Noul` questions, and one explicit
+risk `Noul` per candidate in the same `POST /v1/systemone` request:
 
 - Which legal high-level skill should run next?
-- Is the state risky for the most appropriate next action? This is a heuristic
-  signal, not a safety assessment conditioned on the selected answer: concurrent
-  questions do not see each other's outputs.
+- Would this specific candidate cause a collision or property risk? Each question
+  names its action; the gate uses the answer for the selected candidate.
 - Does this situation require a stronger planner?
 - Is the task complete?
 
 No API key is stored by the project.
+Model probabilities and confidence are estimates, not physical safety guarantees.
+The grid's deterministic preconditions remain the actual collision check.
+
+Contracts checked against the official documentation:
+[TypeSafe HTTP API](https://docs.typesafe.ai/api) and
+[OpenRouter chat completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion).
 
 ### Install AI2-THOR
 
@@ -117,9 +158,16 @@ to a shortest-path controller is the next milestone.
 ## Run tests
 
 ```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+# With dev dependencies installed, also runs the original pytest functions:
 pytest
-ruff check .
 ```
+
+Offline tests cover obstacle avoidance, gated actions, request/response contracts,
+malformed model outputs, stale planner results, reset, planner failures, and a
+complete episode with fixture API responses. **Fixture responses do not validate
+Jev/LLM intelligence, live service availability or real model performance.**
+Live calls remain unverified until credentials are configured and an episode runs.
 
 ## MVP roadmap
 
@@ -130,9 +178,10 @@ ruff check .
 - [x] Optional AI2-THOR state adapter
 - [x] Interactive 2D grid with dynamic obstacle, executable actions and episode export
 - [ ] AI2-THOR semantic navigation controller
-- [ ] Strong-LLM planner fallback
+- [x] Optional background LLM planner integration (live API verification pending)
 - [x] Local dashboard with decision latency, action history and map
-- [ ] API cost accounting and calibrated confidence visualization
+- [x] Action probability display and Jev input-token totals
+- [ ] Full cost accounting and empirical confidence calibration
 - [ ] Evaluation: Jev vs LLM vs hybrid
 
 ## Why high-level actions?

@@ -82,6 +82,9 @@ class GridBaseline:
     def decide(self, state):
         context = state.context
         start, target = tuple(context["position"]), tuple(context["target"])
+        waypoint = context.get("planner", {}).get("waypoint")
+        if waypoint is not None and tuple(waypoint) != start:
+            target = tuple(waypoint)
         obstacles = {tuple(p) for p in context["walls"] + context["obstacles"]}
         action = "stop"
         if not state.task_complete:

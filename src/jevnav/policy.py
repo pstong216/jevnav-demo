@@ -39,4 +39,5 @@ class ReflexPolicy:
             needs_planner_probability=decision.needs_planner_probability,
             complete_probability=decision.complete_probability,
             model=f"{decision.model}+gate",
+            usage=decision.usage,
         )

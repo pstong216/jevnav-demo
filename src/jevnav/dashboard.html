@@ -9,7 +9,8 @@
 <header><div><small>EMBODIED DECISION SANDBOX</small><h1>JevNav</h1><span class="muted">取杯子 → 遇到障碍 → 绕行送达</span></div><span id="badge">连接中</span></header>
 <main><section class="panel"><h2>厨房 · 二维导航</h2><div id="grid" role="img" aria-label="机器人、杯子、目标桌子和障碍地图"></div><p class="muted">● 机器人　☕ 杯子　◎ 目标桌子　橙色：新增障碍</p><p id="status"></p><button id="run">自动运行</button><button id="step" class="secondary">执行一步</button><button id="reset" class="secondary">重置</button><button id="download" class="secondary">导出日志</button><p id="error" role="alert"></p></section>
 <aside class="panel"><h2>决策与反馈</h2><p id="subgoal"></p><p id="latency" class="muted">尚未执行</p><h2>最近一次决策的候选动作</h2><div id="actions"></div><h2 style="margin-top:28px">执行记录</h2><ol id="events"></ol></aside></main>
-<footer class="muted">基线模式使用 BFS 寻路，不调用 Jev。Jev 模式需在服务端配置 API key。地图完全可见；这是离散仿真，不包含三维物理或视觉感知。子目标由规则更新，尚未接入大模型规划器。</footer>
+<section class="panel" style="margin-top:20px"><h2>后台规划器</h2><p id="planner">未启用</p><p id="metrics" class="muted"></p></section>
+<footer class="muted">基线模式使用 BFS 寻路，不调用 Jev。可选 rule 规划器用于离线检查，llm 规划器通过 OpenRouter 调用。地图完全可见；这是离散仿真，不包含三维物理或视觉感知。概率和置信度是模型估计，不是安全保证。</footer>
 <script>
 let data, running=false, busy=false, generation=0;
 const el=id=>document.getElementById(id);
@@ -23,13 +24,15 @@ function render(d){data=d;const s=d.state,c=s.context,last=d.events.at(-1);el('b
   if(at(c.position)){cell.textContent=s.holding?'☕':'●';cell.classList.add('robot')}el('grid').append(cell);
  }
  el('subgoal').textContent='当前子目标：'+({'collect mug':'取得杯子','deliver mug':'送到桌子','complete':'完成'}[c.subgoal]);
- el('status').textContent=s.task_complete?'送达成功：环境已验证杯子位置。':d.finished?'已停止，任务未完成。':c.revision?'中央通道已被挡住，需要走上方或下方通道。':'取杯子后，中央通道将出现障碍。';
+ el('status').textContent=s.task_complete?'送达成功：环境已验证杯子位置。':d.finished?'已停止：'+d.finish_reason:c.revision?'中央通道已被挡住，需要走上方或下方通道。':'取杯子后，中央通道将出现障碍。';
+ const p=d.planner;el('planner').textContent=!p?.enabled?'未启用':p.error||((p.pending?'正在规划… ':'')+(p.plan?`${p.plan.model} · ${p.plan.objective} · waypoint ${JSON.stringify(p.plan.waypoint)} · ${p.plan.notes}`:'等待初始计划'));
+ el('metrics').textContent=d.metrics?`${d.metrics.steps} 步 · 决策总耗时 ${d.metrics.decision_ms} ms · Jev 输入 tokens ${d.metrics.jev_input_tokens}`:'';
  el('latency').textContent=last?`${last.decision.model} · ${last.latency_ms} ms`:'尚未执行';el('actions').replaceChildren();
- for(const a of last?.candidates||s.legal_actions){const chip=document.createElement('span');chip.className='chip'+(a===last?.decision.action?' selected':'');chip.textContent=a;el('actions').append(chip)}
+ for(const a of last?.candidates||s.legal_actions){const chip=document.createElement('span');chip.className='chip'+(a===last?.decision.action?' selected':'');const probability=last?.decision.probabilities[a];chip.textContent=a+(probability===undefined?'':` · ${(probability*100).toFixed(1)}%`);el('actions').append(chip)}
  el('events').replaceChildren();for(const e of [...d.events].reverse()){const li=document.createElement('li');li.textContent=`#${e.step} ${e.decision.action} → ${e.result}`;el('events').append(li)}controls();
 }
 async function request(path,post=false){const response=await fetch('/api/'+path,post?{method:'POST',headers:{'X-JevNav':'1'}}:{});const d=await response.json();if(!response.ok)throw Error(d.error);render(d)}
-async function step(){busy=true;controls();try{await request('step',true)}catch(e){el('error').textContent=e.message;running=false}finally{busy=false;controls()}}
+async function step(){busy=true;controls();try{await request('step',true)}catch(e){el('error').textContent=e.message;running=false;try{await request('state')}catch{}}finally{busy=false;controls()}}
 el('step').onclick=step;
 el('run').onclick=async()=>{if(running){running=false;generation++;controls();return}const current=++generation;running=true;controls();while(running&&current===generation&&!data.finished){await step();if(running&&!data.finished)await new Promise(r=>setTimeout(r,350))}if(current===generation)running=false;controls()};
 el('reset').onclick=async()=>{running=false;generation++;busy=true;controls();el('error').textContent='';try{await request('reset',true)}catch(e){el('error').textContent=e.message}finally{busy=false;controls()}};

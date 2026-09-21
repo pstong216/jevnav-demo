@@ -41,3 +41,4 @@ class Decision:
     needs_planner_probability: float = 0.0
     complete_probability: float = 0.0
     model: str = "unknown"
+    usage: dict[str, int] = field(default_factory=dict)

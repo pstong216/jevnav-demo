@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jevnav-demo"
+version = "0.1.0"
+description = "A fast robot reflex-layer demo using TypeSafe Jev and AI2-THOR."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+jev = ["typesafe-sdk"]
+thor = ["ai2thor"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+jevnav = "jevnav.demo:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

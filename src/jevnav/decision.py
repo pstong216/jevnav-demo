@@ -26,11 +26,14 @@ class MockDecisionEngine:
         else:
             action = "stop"
 
-        probabilities = {candidate: 0.01 for candidate in state.legal_actions}
-        probabilities[action] = 0.96
+        count = len(state.legal_actions)
+        probabilities = {
+            candidate: (0.96 if candidate == action else 0.04 / (count - 1))
+            for candidate in state.legal_actions
+        } if count > 1 else {action: 1.0}
         return Decision(
             action=action,
-            action_confidence=0.95,
+            action_confidence=probabilities[action],
             probabilities=probabilities,
             unsafe_probability=0.01,
             needs_planner_probability=0.02,
@@ -107,4 +110,3 @@ def _describe_action(action: str) -> str:
     }
     suffix = f" ({', '.join(args)})" if args else ""
     return descriptions.get(verb, f"Execute {verb}") + suffix
-

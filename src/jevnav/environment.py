@@ -30,7 +30,8 @@ class MockKitchenEnvironment:
             room="kitchen",
             holding="mug_1" if 2 <= self._stage <= 3 else None,
             visible_objects=(
-                {"id": "mug_1", "type": "mug", "location": "table"},
+                {"id": "mug_1", "type": "mug", "location":
+                 "sink" if self._stage == 4 else "held" if self._stage >= 2 else "table"},
                 {"id": "sink_1", "type": "sink", "location": "north_wall"},
             ),
             legal_actions=actions_by_stage[self._stage],
@@ -52,4 +53,3 @@ class MockKitchenEnvironment:
         if self._stage < len(expected) and action == expected[self._stage]:
             self._stage += 1
         return self.observe()
-

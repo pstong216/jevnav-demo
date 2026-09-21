@@ -33,6 +33,45 @@ new environment state -> repeat
 
 ## Quick start
 
+### Interactive navigation demo (new)
+
+```bash
+pip install -e .
+jevnav-dashboard
+```
+
+Open http://127.0.0.1:8765. Click **自动运行** or **执行一步**.
+The robot collects a mug, the central doorway becomes blocked, and it must
+deliver the mug via another doorway. The dashboard shows the grid, subgoal,
+candidate actions, selected action, measured decision latency, and execution
+results. **导出日志** downloads the current episode as JSON.
+
+The default engine is a deterministic **BFS baseline, not Jev**. This is a
+fully observed 2D grid sandbox, not AI2-THOR, visual navigation, or robot physics.
+Candidates are generated from current collision and interaction preconditions;
+the executor validates them again before moving. Completion is checked by the
+environment, not a model's completion score. Episodes stop after 100 actions.
+Subgoals are rule-based; asynchronous LLM planning is not implemented yet.
+
+To use the existing Jev SDK adapter for these same live grid states:
+
+```bash
+pip install -e '.[jev]'
+export TYPESAFE_API_KEY='...'
+jevnav-dashboard --engine jev
+```
+
+The API adapter is not yet validated end-to-end with live credentials. API errors
+stop the episode; they never silently switch to the baseline. Keys remain in the
+server process. The server binds only to localhost and supports one shared session.
+In this sandbox, `replan` refreshes observations; it does not call an LLM.
+
+Architecture inspiration: [rmalde/minecraft-agent](https://github.com/rmalde/minecraft-agent),
+particularly executable candidates and action-result feedback. No source code
+from that project is copied.
+
+### Original mock CLI
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -57,7 +96,9 @@ The adapter sends one `Choice` and three `Noul` questions in the same
 `system_one` request:
 
 - Which legal high-level skill should run next?
-- Is the proposed action unsafe?
+- Is the state risky for the most appropriate next action? This is a heuristic
+  signal, not a safety assessment conditioned on the selected answer: concurrent
+  questions do not see each other's outputs.
 - Does this situation require a stronger planner?
 - Is the task complete?
 
@@ -87,9 +128,11 @@ ruff check .
 - [x] Confidence/safety gate
 - [x] Fully runnable mock kitchen episode
 - [x] Optional AI2-THOR state adapter
+- [x] Interactive 2D grid with dynamic obstacle, executable actions and episode export
 - [ ] AI2-THOR semantic navigation controller
 - [ ] Strong-LLM planner fallback
-- [ ] Live dashboard with latency, cost, confidence, and trajectory
+- [x] Local dashboard with decision latency, action history and map
+- [ ] API cost accounting and calibrated confidence visualization
 - [ ] Evaluation: Jev vs LLM vs hybrid
 
 ## Why high-level actions?
@@ -97,4 +140,3 @@ ruff check .
 Jev is a hosted decision API, not a motor controller. It should select semantic
 skills at a modest frequency; a local controller should still produce wheel
 velocities, joint commands, paths, and collision-free trajectories.
-

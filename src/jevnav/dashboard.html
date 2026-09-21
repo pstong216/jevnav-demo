@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JevNav · Navigation lab</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#e7edf4;background:#101820}*{box-sizing:border-box}body{max-width:1150px;margin:auto;padding:35px 24px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px}h1{margin:4px 0;font-size:32px}small,.muted{color:#97aabb}#badge{border:1px solid #526c7a;border-radius:20px;padding:9px 16px}main{display:grid;grid-template-columns:1.6fr 1fr;gap:20px}.panel{background:#192630;border:1px solid #304350;border-radius:16px;padding:24px}h2{font-size:16px;margin-top:0}#grid{display:grid;grid-template-columns:repeat(11,1fr);gap:4px;margin:22px 0}.cell{aspect-ratio:1;background:#223541;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px}.wall{background:#627482}.blocked{background:#ab4c32}.robot{background:#7be3c3;color:#102a25;border-radius:50%}.target{outline:2px solid #efcb76}button{padding:10px 16px;border:0;border-radius:7px;background:#7be3c3;color:#122a24;font:inherit;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#304551;color:#eef4f7}button:disabled{opacity:.4;cursor:default}#actions{display:flex;gap:6px;flex-wrap:wrap}.chip{font:12px monospace;background:#263b49;border-radius:5px;padding:7px}.selected{background:#7be3c3;color:#102a25}#events{max-height:310px;overflow:auto;padding-left:20px;font-size:13px}li{margin-bottom:12px;line-height:1.6}#status{min-height:45px;color:#efcb76}#error{color:#ffab98}footer{margin-top:20px;font-size:13px;line-height:1.8}@media(max-width:800px){main{grid-template-columns:1fr}.panel{padding:16px}.cell{font-size:16px}header{align-items:flex-start;gap:15px}}
+</style>
+<header><div><small>EMBODIED DECISION SANDBOX</small><h1>JevNav</h1><span class="muted">取杯子 → 遇到障碍 → 绕行送达</span></div><span id="badge">连接中</span></header>
+<main><section class="panel"><h2>厨房 · 二维导航</h2><div id="grid" role="img" aria-label="机器人、杯子、目标桌子和障碍地图"></div><p class="muted">● 机器人　☕ 杯子　◎ 目标桌子　橙色：新增障碍</p><p id="status"></p><button id="run">自动运行</button><button id="step" class="secondary">执行一步</button><button id="reset" class="secondary">重置</button><button id="download" class="secondary">导出日志</button><p id="error" role="alert"></p></section>
+<aside class="panel"><h2>决策与反馈</h2><p id="subgoal"></p><p id="latency" class="muted">尚未执行</p><h2>最近一次决策的候选动作</h2><div id="actions"></div><h2 style="margin-top:28px">执行记录</h2><ol id="events"></ol></aside></main>
+<footer class="muted">基线模式使用 BFS 寻路，不调用 Jev。Jev 模式需在服务端配置 API key。地图完全可见；这是离散仿真，不包含三维物理或视觉感知。子目标由规则更新，尚未接入大模型规划器。</footer>
+<script>
+let data, running=false, busy=false, generation=0;
+const el=id=>document.getElementById(id);
+function controls(){el('step').disabled=!data||busy||running||data?.finished;el('reset').disabled=!data||busy;el('run').disabled=!data||busy&&!running||data?.finished;el('run').textContent=running?'暂停':'自动运行'}
+function render(d){data=d;const s=d.state,c=s.context,last=d.events.at(-1);el('badge').textContent=d.engine==='jev'?'Jev API':'BFS 基线 · 无 API';el('grid').replaceChildren();
+ for(let y=0;y<c.size[1];y++)for(let x=0;x<c.size[0];x++){
+  const cell=document.createElement('div');cell.className='cell';const at=p=>p[0]===x&&p[1]===y;
+  if(c.walls.some(at))cell.classList.add('wall');if(c.obstacles.some(at))cell.classList.add('blocked');
+  if(at(s.visible_objects[1].location)){cell.textContent='◎';cell.classList.add('target')}
+  if(!s.holding&&at(s.visible_objects[0].location))cell.textContent='☕';
+  if(at(c.position)){cell.textContent=s.holding?'☕':'●';cell.classList.add('robot')}el('grid').append(cell);
+ }
+ el('subgoal').textContent='当前子目标：'+({'collect mug':'取得杯子','deliver mug':'送到桌子','complete':'完成'}[c.subgoal]);
+ el('status').textContent=s.task_complete?'送达成功：环境已验证杯子位置。':d.finished?'已停止，任务未完成。':c.revision?'中央通道已被挡住，需要走上方或下方通道。':'取杯子后，中央通道将出现障碍。';
+ el('latency').textContent=last?`${last.decision.model} · ${last.latency_ms} ms`:'尚未执行';el('actions').replaceChildren();
+ for(const a of last?.candidates||s.legal_actions){const chip=document.createElement('span');chip.className='chip'+(a===last?.decision.action?' selected':'');chip.textContent=a;el('actions').append(chip)}
+ el('events').replaceChildren();for(const e of [...d.events].reverse()){const li=document.createElement('li');li.textContent=`#${e.step} ${e.decision.action} → ${e.result}`;el('events').append(li)}controls();
+}
+async function request(path,post=false){const response=await fetch('/api/'+path,post?{method:'POST',headers:{'X-JevNav':'1'}}:{});const d=await response.json();if(!response.ok)throw Error(d.error);render(d)}
+async function step(){busy=true;controls();try{await request('step',true)}catch(e){el('error').textContent=e.message;running=false}finally{busy=false;controls()}}
+el('step').onclick=step;
+el('run').onclick=async()=>{if(running){running=false;generation++;controls();return}const current=++generation;running=true;controls();while(running&&current===generation&&!data.finished){await step();if(running&&!data.finished)await new Promise(r=>setTimeout(r,350))}if(current===generation)running=false;controls()};
+el('reset').onclick=async()=>{running=false;generation++;busy=true;controls();el('error').textContent='';try{await request('reset',true)}catch(e){el('error').textContent=e.message}finally{busy=false;controls()}};
+el('download').onclick=()=>{if(!data)return;const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='jevnav-episode.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+controls();request('state').catch(e=>{el('error').textContent=e.message});
+</script>
+</html>

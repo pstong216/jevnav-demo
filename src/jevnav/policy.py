@@ -30,7 +30,7 @@ class ReflexPolicy:
     def _gate(decision: Decision, preferred: str, state: RobotState) -> Decision:
         action = preferred if preferred in state.legal_actions else "stop"
         if action not in state.legal_actions:
-            action = state.legal_actions[0]
+            raise RuntimeError("Decision rejected; no legal stop or replan action exists")
         return Decision(
             action=action,
             action_confidence=decision.action_confidence,
@@ -40,4 +40,3 @@ class ReflexPolicy:
             complete_probability=decision.complete_probability,
             model=f"{decision.model}+gate",
         )
-

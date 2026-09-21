@@ -13,6 +13,7 @@ class RobotState:
     legal_actions: tuple[str, ...]
     history: tuple[str, ...] = ()
     task_complete: bool = False
+    context: dict[str, Any] = field(default_factory=dict)
 
     def as_prompt(self) -> str:
         objects = ", ".join(
@@ -26,7 +27,8 @@ class RobotState:
             f"Visible objects: {objects or 'none'}\n"
             f"Legal actions: {', '.join(self.legal_actions)}\n"
             f"Action history: {', '.join(self.history) or 'none'}\n"
-            f"Environment task-complete signal: {self.task_complete}"
+            f"Environment task-complete signal: {self.task_complete}\n"
+            f"Navigation context: {self.context}"
         )
 
 
@@ -39,4 +41,3 @@ class Decision:
     needs_planner_probability: float = 0.0
     complete_probability: float = 0.0
     model: str = "unknown"
-
